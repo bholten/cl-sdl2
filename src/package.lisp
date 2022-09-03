@@ -108,6 +108,7 @@
    #:next-event
    #:with-event-loop
    #:expand-handler
+   #:dt
 
    ;; keyboard.lisp
    #:keysym-slot-value

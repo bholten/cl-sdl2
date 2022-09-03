@@ -189,8 +189,7 @@ Stores the optional user-data in sdl2::*user-events*"
                                    (nreverse parameter-pairs)))
         ,@forms))))
 
-;; TODO you should be able to specify a target framerate
-(defmacro with-event-loop ((&key background (method :poll) (timeout nil) recursive)
+(defmacro with-event-loop ((&key background (method :poll) (target-fps 60) (timeout nil) recursive)
                            &body event-handlers)
   (let ((quit (gensym "QUIT-"))
         (sdl-event (gensym "SDL-EVENT-"))
@@ -207,26 +206,34 @@ Stores the optional user-data in sdl2::*user-events*"
                 (with-sdl-event (,sdl-event)
                   (setf ,idle-func #'(lambda () ,@(expand-idle-handler event-handlers)))
                   (progn ,@(cddr (find :initialize event-handlers :key #'first)))
-                  (loop :until ,quit
-                        :do (loop :as ,rc = (next-event ,sdl-event ,method ,timeout)
-                                  ,@(if (eq :poll method)
-                                        `(:until (= 0 ,rc))
-                                        `(:until ,quit))
-                                  :do (let* ((,sdl-event-type (get-event-type ,sdl-event))
-                                             (,sdl-event-id (and (user-event-type-p ,sdl-event-type)
-                                                                 (,sdl-event :user :code))))
-                                        (case ,sdl-event-type
-                                          (:lisp-message () (get-and-handle-messages))
-                                          ,@(loop :for (type params . forms) :in event-handlers
-                                                  :collect
-                                                  (if (eq type :quit)
-                                                      (expand-quit-handler sdl-event forms quit)
-                                                      (expand-handler sdl-event type params forms))
-                                                    :into results
-                                                  :finally (return (remove nil results))))
-                                        (when (and ,sdl-event-id
-                                                   (not (eq ,sdl-event-type :lisp-message)))
-                                          (free-user-data ,sdl-event-id))))
-                            (unless ,quit
-                              (funcall ,idle-func))))
-             (setf *event-loop* nil)))))))
+		  (let ((target-frame-time (floor (* 1000 (/ 1.0 ,target-fps))))
+			(current-frame-time 0)
+			(previous-frame-time 0))
+		    (loop :until ,quit
+			  :do (progn
+				(loop :as ,rc = (next-event ,sdl-event ,method ,timeout)
+				      ,@(if (eq :poll method)
+					    `(:until (= 0 ,rc))
+					    `(:until ,quit))
+				      :do (let* ((,sdl-event-type (get-event-type ,sdl-event))
+						 (,sdl-event-id (and (user-event-type-p ,sdl-event-type)
+								     (,sdl-event :user :code))))
+					    (case ,sdl-event-type
+					      (:lisp-message () (get-and-handle-messages))
+					      ,@(loop :for (type params . forms) :in event-handlers
+						      :collect
+						       (if (eq type :quit)
+							   (expand-quit-handler sdl-event forms quit)
+							   (expand-handler sdl-event type params forms))
+							:into results
+						       :finally (return (remove nil results))))
+					    (when (and ,sdl-event-id
+						       (not (eq ,sdl-event-type :lisp-message)))
+					      (free-user-data ,sdl-event-id))))
+				(setf current-frame-time (get-ticks))
+				(when (>= target-frame-time (- current-frame-time previous-frame-time))
+				  (delay (- target-frame-time (- current-frame-time previous-frame-time))))
+				(setf previous-frame-time current-frame-time)
+				(unless ,quit
+				  (funcall ,idle-func))))))
+	     (setf *event-loop* nil)))))))

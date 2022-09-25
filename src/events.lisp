@@ -196,48 +196,52 @@ Stores the optional user-data in sdl2::*user-events*"
         (sdl-event-type (gensym "SDL-EVENT-TYPE"))
         (sdl-event-id (gensym "SDL-EVENT-ID"))
         (idle-func (gensym "IDLE-FUNC-"))
-        (rc (gensym "RC-")))
+        (rc (gensym "RC-"))
+	(target-frame-time (gensym "TARGET-FRAME-TIME-"))
+	(current-frame-time (gensym "CURRENT-FRAME-TIME-"))
+	(previous-frame-time (gensym "PREVIOUS-FRAME-TIME-"))
+	(delta-time (gensym "DELTA-TIME-")))
     `(when (or ,recursive (not *event-loop*))
        (setf *event-loop* t)
        (in-main-thread (:background ,background)
          (let ((,quit nil)
                (,idle-func nil)
+	       (,target-frame-time (floor (* 1000 (/ 1.0 ,target-fps))))
+	       (,current-frame-time 0)
+	       (,previous-frame-time 0)
+	       (,delta-time 0)
 	       (dt 0))
            (unwind-protect
                 (with-sdl-event (,sdl-event)
-		  (let ((target-frame-time (floor (* 1000 (/ 1.0 ,target-fps))))
-			(current-frame-time 0)
-			(previous-frame-time 0)
-			(delta-time 0))
-		    (setf ,idle-func #'(lambda () ,@(expand-idle-handler event-handlers)))
-		    (progn ,@(cddr (find :initialize event-handlers :key #'first)))
-		    (loop :until ,quit
-			  :do (progn
-				(loop :as ,rc = (next-event ,sdl-event ,method ,timeout)
-				      ,@(if (eq :poll method)
-					    `(:until (= 0 ,rc))
-					    `(:until ,quit))
-				      :do (let* ((,sdl-event-type (get-event-type ,sdl-event))
-						 (,sdl-event-id (and (user-event-type-p ,sdl-event-type)
-								     (,sdl-event :user :code))))
-					    (case ,sdl-event-type
-					      (:lisp-message () (get-and-handle-messages))
-					      ,@(loop :for (type params . forms) :in event-handlers
-						      :collect
-						       (if (eq type :quit)
-							   (expand-quit-handler sdl-event forms quit)
-							   (expand-handler sdl-event type params forms))
-							:into results
-						       :finally (return (remove nil results))))
-					    (when (and ,sdl-event-id
-						       (not (eq ,sdl-event-type :lisp-message)))
-					      (free-user-data ,sdl-event-id))))
-				(setf current-frame-time (get-ticks))
-				(setf delta-time (- current-frame-time previous-frame-time))
-				(when (>= target-frame-time delta-time)
-				  (delay (- target-frame-time delta-time)))
-				(setf previous-frame-time current-frame-time)
-				(setf dt (floor (/ delta-time 1000.0)))
-				(unless ,quit
-				  (funcall ,idle-func))))))
+		  (setf ,idle-func #'(lambda () ,@(expand-idle-handler event-handlers)))
+		  (progn ,@(cddr (find :initialize event-handlers :key #'first)))
+		  (loop :until ,quit
+			:do (progn
+			      (loop :as ,rc = (next-event ,sdl-event ,method ,timeout)
+				    ,@(if (eq :poll method)
+					  `(:until (= 0 ,rc))
+					  `(:until ,quit))
+				    :do (let* ((,sdl-event-type (get-event-type ,sdl-event))
+					       (,sdl-event-id (and (user-event-type-p ,sdl-event-type)
+								   (,sdl-event :user :code))))
+					  (case ,sdl-event-type
+					    (:lisp-message () (get-and-handle-messages))
+					    ,@(loop :for (type params . forms) :in event-handlers
+						    :collect
+						    (if (eq type :quit)
+							(expand-quit-handler sdl-event forms quit)
+							(expand-handler sdl-event type params forms))
+						      :into results
+						    :finally (return (remove nil results))))
+					  (when (and ,sdl-event-id
+						     (not (eq ,sdl-event-type :lisp-message)))
+					    (free-user-data ,sdl-event-id))))
+			      (setf ,current-frame-time (get-ticks))
+			      (setf ,delta-time (- ,current-frame-time ,previous-frame-time))
+			      (when (>= ,target-frame-time ,delta-time)
+				(delay (- ,target-frame-time ,delta-time)))
+			      (setf ,previous-frame-time ,current-frame-time)
+			      (setf dt (floor (/ ,delta-time 1000.0)))
+			      (unless ,quit
+				(funcall ,idle-func)))))
 	     (setf *event-loop* nil)))))))

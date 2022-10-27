@@ -108,7 +108,7 @@
    #:next-event
    #:with-event-loop
    #:expand-handler
-   #:dt
+   #:*delta-time*
 
    ;; keyboard.lisp
    #:keysym-slot-value

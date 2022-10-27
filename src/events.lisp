@@ -8,6 +8,7 @@
     (setf (new-atomic :value) 0)
     new-atomic))
 (defvar *event-loop* nil)
+(defvar *delta-time* 0)
 
 (defun new-event (&optional (event-type :firstevent))
   (c-let ((event sdl2-ffi:sdl-event))
@@ -199,8 +200,7 @@ Stores the optional user-data in sdl2::*user-events*"
         (rc (gensym "RC-"))
 	(target-frame-time (gensym "TARGET-FRAME-TIME-"))
 	(current-frame-time (gensym "CURRENT-FRAME-TIME-"))
-	(previous-frame-time (gensym "PREVIOUS-FRAME-TIME-"))
-	(delta-time (gensym "DELTA-TIME-")))
+	(previous-frame-time (gensym "PREVIOUS-FRAME-TIME-")))
     `(when (or ,recursive (not *event-loop*))
        (setf *event-loop* t)
        (in-main-thread (:background ,background)
@@ -208,15 +208,14 @@ Stores the optional user-data in sdl2::*user-events*"
                (,idle-func nil)
 	       (,target-frame-time (floor (* 1000 (/ 1.0 ,target-fps))))
 	       (,current-frame-time 0)
-	       (,previous-frame-time 0)
-	       (,delta-time 0)
-	       (dt 0))
+	       (,previous-frame-time 0))
            (unwind-protect
                 (with-sdl-event (,sdl-event)
 		  (setf ,idle-func #'(lambda () ,@(expand-idle-handler event-handlers)))
 		  (progn ,@(cddr (find :initialize event-handlers :key #'first)))
 		  (loop :until ,quit
 			:do (progn
+			      (setf ,previous-frame-time (get-ticks))
 			      (loop :as ,rc = (next-event ,sdl-event ,method ,timeout)
 				    ,@(if (eq :poll method)
 					  `(:until (= 0 ,rc))
@@ -237,11 +236,12 @@ Stores the optional user-data in sdl2::*user-events*"
 						     (not (eq ,sdl-event-type :lisp-message)))
 					    (free-user-data ,sdl-event-id))))
 			      (setf ,current-frame-time (get-ticks))
-			      (setf ,delta-time (- ,current-frame-time ,previous-frame-time))
-			      (when (>= ,target-frame-time ,delta-time)
-				(delay (- ,target-frame-time ,delta-time)))
+			      (setf *delta-time* (- ,current-frame-time ,previous-frame-time))
+			      (when (>= ,target-frame-time *delta-time*)
+				(prog2
+				    (setf *delta-time* (- ,target-frame-time *delta-time*))
+				    (delay (- ,target-frame-time *delta-time*))))
 			      (setf ,previous-frame-time ,current-frame-time)
-			      (setf dt (floor (/ ,delta-time 1000.0)))
 			      (unless ,quit
 				(funcall ,idle-func)))))
 	     (setf *event-loop* nil)))))))
